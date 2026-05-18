@@ -1,0 +1,99 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Service {
+  id    Int    @id @default(autoincrement())
+  name  String @unique
+
+  leads          Lead[]
+  mandatoryRules MandatoryRule[]
+  fairPools      FairPool[]
+  roundRobins    RoundRobinCounter[]
+}
+
+model Provider {
+  id           Int    @id @default(autoincrement())
+  name         String @unique
+  monthlyQuota Int    @default(10)
+  currentCount Int    @default(0)
+
+  mandatoryRules  MandatoryRule[]
+  fairPools       FairPool[]
+  leadAssignments LeadAssignment[]
+}
+
+model Lead {
+  id          Int      @id @default(autoincrement())
+  name        String
+  phone       String
+  city        String
+  serviceId   Int
+  description String
+  createdAt   DateTime @default(now())
+
+  service     Service          @relation(fields: [serviceId], references: [id])
+  assignments LeadAssignment[]
+
+  // DUPLICATE RULE: Same phone + same service = rejected at DB level
+  @@unique([phone, serviceId])
+}
+
+model LeadAssignment {
+  id         Int      @id @default(autoincrement())
+  leadId     Int
+  providerId Int
+  assignedAt DateTime @default(now())
+
+  lead     Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  provider Provider @relation(fields: [providerId], references: [id])
+
+  // Same provider cannot receive the same lead twice
+  @@unique([leadId, providerId])
+}
+
+// Which providers MUST receive leads for a given service
+model MandatoryRule {
+  id         Int @id @default(autoincrement())
+  serviceId  Int
+  providerId Int
+
+  service  Service  @relation(fields: [serviceId], references: [id])
+  provider Provider @relation(fields: [providerId], references: [id])
+
+  @@unique([serviceId, providerId])
+}
+
+// Which providers are in the fair-rotation pool for a given service
+model FairPool {
+  id         Int @id @default(autoincrement())
+  serviceId  Int
+  providerId Int
+
+  service  Service  @relation(fields: [serviceId], references: [id])
+  provider Provider @relation(fields: [providerId], references: [id])
+
+  @@unique([serviceId, providerId])
+}
+
+// Persisted round-robin counter per service — survives server restarts
+model RoundRobinCounter {
+  id        Int @id @default(autoincrement())
+  serviceId Int @unique
+  counter   Int @default(0)
+
+  service Service @relation(fields: [serviceId], references: [id])
+}
+
+// Webhook idempotency tracking
+model WebhookLog {
+  id             Int      @id @default(autoincrement())
+  idempotencyKey String   @unique
+  action         String
+  processedAt    DateTime @default(now())
+}
